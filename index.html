@@ -1,0 +1,604 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Erik's ChatGPT Archive Viewer</title>
+<style>
+  :root{
+    color-scheme: light dark;
+    --bg:#f7f7f8; --panel:#ffffff; --text:#202123; --muted:#6b7280;
+    --border:#d9d9e3; --hover:#ececf1; --selected:#e2e8f0; --accent:#10a37f;
+    --user:#eaf4ff; --assistant:#f4f4f5;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#202123; --panel:#2b2c2f; --text:#f7f7f8; --muted:#a9a9b3;
+      --border:#444654; --hover:#343541; --selected:#444654; --accent:#19c37d;
+      --user:#26384a; --assistant:#343541;
+    }
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text)}
+  button,input{font:inherit}
+  #app{height:100vh;min-height:0;display:grid;grid-template-columns:380px minmax(0,1fr);overflow:hidden}
+  aside{
+      border-right:1px solid var(--border);
+      background:var(--panel);
+      min-width:0;
+      min-height:0;
+      height:100vh;
+      overflow-y:auto;
+      overflow-x:hidden;
+      scrollbar-gutter:stable;
+    }
+  header{padding:12px 14px 8px;border-bottom:1px solid var(--border)}
+  h1{font-size:18px;margin:0 0 4px}
+  .sub{font-size:11px;color:var(--muted);line-height:1.25}
+  .controls{padding:8px 10px;display:grid;gap:6px;border-bottom:1px solid var(--border)}
+  .row{display:flex;gap:8px}
+  button,.fileLabel{
+    border:1px solid var(--border);background:var(--panel);color:var(--text);
+    padding:7px 9px;border-radius:8px;cursor:pointer;text-align:center
+  }
+  button:hover,.fileLabel:hover{background:var(--hover)}
+  .fileLabel{display:block;width:100%;font-weight:600}
+  #fileInput{display:none}
+  #search{width:100%;padding:8px 9px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)}
+  #stats{font-size:12px;color:var(--muted)}
+  #chatList{
+      overflow:visible;
+      min-height:0;
+      width:100%;
+    }
+  .chatItem{
+      padding:9px 12px;
+      border-bottom:1px solid var(--border);
+      cursor:pointer;
+      min-height:42px;
+    }
+  .chatItem:hover{background:var(--hover)}
+  .chatItem.selected{background:var(--selected)}
+  .chatTitle{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .chatDate{font-size:11px;color:var(--muted);margin-top:4px}
+  main{overflow-y:auto;overflow-x:hidden;min-width:0;min-height:0;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;scrollbar-gutter:stable}
+  #empty{height:100%;display:grid;place-items:center;padding:30px;text-align:center;color:var(--muted)}
+  #conversation{max-width:900px;margin:0 auto;padding:28px 24px 120px;display:none}
+  #conversationTitle{font-size:28px;margin:0 0 6px}
+  #conversationMeta{color:var(--muted);font-size:13px;margin-bottom:26px}
+  .message{padding:16px 18px;border-radius:12px;margin:12px 0;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere}
+  .message.user{background:var(--user)}
+  .message.assistant{background:var(--assistant)}
+  .message.other{border:1px solid var(--border)}
+  .role{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:700;color:var(--muted);margin-bottom:7px}
+  .msgdate{font-size:10px;color:var(--muted);margin-top:8px}
+  .notice{padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:12px;color:var(--muted)}
+  .small{font-size:10px;color:var(--muted);line-height:1.25}
+  .statusBox{padding:9px 11px;border:1px solid var(--border);border-radius:8px;font-size:12px;line-height:1.45;display:none}
+  .statusBox.show{display:block;max-height:92px;overflow:auto}
+  #saveBtn{width:100%;font-weight:600}
+  #saveBtn:disabled{opacity:.5;cursor:default}
+  .pasteBox{display:grid;gap:7px;padding:9px;border:1px solid var(--border);border-radius:8px}
+  .pasteBox summary{cursor:pointer;font-weight:600;font-size:12px}
+  #pasteInput{width:100%;min-height:92px;resize:vertical;padding:9px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font:11px ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
+  #pasteBtn{width:100%;font-weight:700;display:block;min-height:38px}
+  @media(max-width:760px){
+    #app{grid-template-columns:1fr}
+    aside{height:45vh;min-height:0;border-right:0;border-bottom:1px solid var(--border)}
+    main{height:55vh;min-height:0}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside>
+    <header>
+      <h1>Erik's ChatGPT Archive Viewer</h1>
+      <div class="sub">Local archive browser · v1.4.3 · quick-add button fix</div>
+    </header>
+
+    <div class="controls">
+      <label class="fileLabel" for="fileInput">Load / Add conversation JSON</label>
+      <input id="fileInput" type="file" accept=".json,application/json" multiple>
+      <div class="small">Works with official <b>conversations-###.json</b> export files and individual captured files such as <b>current_chat.json</b>. You can add more later without reloading the originals.</div>
+      <details class="pasteBox" open>
+        <summary>Quick add from copied JSON</summary>
+        <textarea id="pasteInput" placeholder="Click here and press ⌘V to paste the conversation JSON you copied from Safari Preview."></textarea>
+        <button id="pasteBtn" type="button">Add pasted conversation</button>
+        <div class="small">Paste → Add pasted conversation → Save merged master archive.</div>
+      </details>
+      <input id="search" type="search" placeholder="Search titles or conversation text…" disabled>
+      <div class="row">
+        <button id="sortBtn" disabled style="flex:1">Newest first</button>
+        <button id="clearBtn" disabled>Clear</button>
+      </div>
+      <button id="saveBtn" disabled>Save merged master archive</button>
+      <div id="stats">No archive loaded.</div>
+      <div id="importStatus" class="statusBox"></div>
+      <div class="notice">Everything stays local. File imports and pasted JSON are processed only in this browser. Saving creates a new local master JSON and never changes your originals.</div>
+    </div>
+
+    <div id="chatList" tabindex="0" aria-label="Conversation list"></div>
+  </aside>
+
+  <main tabindex="0" aria-label="Conversation content">
+    <div id="empty">
+      <div>
+        <strong>Choose all of your OpenAI conversation JSON files.</strong><br><br>
+        Official exports and individual conversation snapshots will be merged into one searchable archive.
+      </div>
+    </div>
+    <article id="conversation">
+      <h2 id="conversationTitle"></h2>
+      <div id="conversationMeta"></div>
+      <div id="messages"></div>
+    </article>
+  </main>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  let chats = [];
+  let filtered = [];
+  let newestFirst = true;
+  let selectedId = null;
+
+  const fileInput = document.getElementById('fileInput');
+  const search = document.getElementById('search');
+  const chatList = document.getElementById('chatList');
+  const stats = document.getElementById('stats');
+  const sortBtn = document.getElementById('sortBtn');
+  const clearBtn = document.getElementById('clearBtn');
+  const saveBtn = document.getElementById('saveBtn');
+  const importStatus = document.getElementById('importStatus');
+  const pasteInput = document.getElementById('pasteInput');
+  const pasteBtn = document.getElementById('pasteBtn');
+  const empty = document.getElementById('empty');
+  const conversation = document.getElementById('conversation');
+  const conversationTitle = document.getElementById('conversationTitle');
+  const conversationMeta = document.getElementById('conversationMeta');
+  const messages = document.getElementById('messages');
+
+  function asDate(value) {
+    if (value === null || value === undefined || value === '') return null;
+    let n = Number(value);
+    let d;
+    if (Number.isFinite(n)) {
+      if (n < 100000000000) n *= 1000;
+      d = new Date(n);
+    } else {
+      d = new Date(value);
+    }
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  function formatDate(value, withTime=false) {
+    const d = asDate(value);
+    if (!d) return 'Date unknown';
+    const opts = withTime
+      ? {year:'numeric',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}
+      : {year:'numeric',month:'short',day:'numeric'};
+    return new Intl.DateTimeFormat(undefined, opts).format(d);
+  }
+
+  function getTextFromContent(content) {
+    if (content == null) return '';
+    if (typeof content === 'string') return content;
+    if (Array.isArray(content)) return content.map(getTextFromContent).filter(Boolean).join('\n');
+
+    if (typeof content === 'object') {
+      if (Array.isArray(content.parts)) {
+        return content.parts.map(part => {
+          if (typeof part === 'string') return part;
+          if (part && typeof part === 'object') {
+            if (typeof part.text === 'string') return part.text;
+            if (typeof part.content === 'string') return part.content;
+            if (typeof part.asset_pointer === 'string') return '[Attachment]';
+          }
+          return '';
+        }).filter(Boolean).join('\n');
+      }
+      if (typeof content.text === 'string') return content.text;
+      if (typeof content.result === 'string') return content.result;
+      if (typeof content.content === 'string') return content.content;
+    }
+    return '';
+  }
+
+  function messageFromNode(node) {
+    const msg = node && node.message;
+    if (!msg) return null;
+    const role = msg.author && msg.author.role ? msg.author.role : 'other';
+    if (!['user','assistant'].includes(role)) return null;
+    const contentType = msg.content && msg.content.content_type;
+    if (['thoughts','reasoning_recap'].includes(contentType)) return null;
+    const text = getTextFromContent(msg.content);
+    if (!text.trim()) return null;
+    return {
+      id: msg.id || node.id || (Math.random().toString(36).slice(2)),
+      role,
+      text,
+      time: msg.create_time || node.create_time || null
+    };
+  }
+
+  function extractMessages(chat) {
+    const mapping = chat.mapping || {};
+    const nodes = Object.values(mapping);
+    if (!nodes.length) return [];
+
+    if (chat.current_node && mapping[chat.current_node]) {
+      const chain = [];
+      const seen = new Set();
+      let id = chat.current_node;
+      while (id && mapping[id] && !seen.has(id)) {
+        seen.add(id);
+        chain.push(mapping[id]);
+        id = mapping[id].parent;
+      }
+      chain.reverse();
+      const msgs = chain.map(messageFromNode).filter(Boolean);
+      if (msgs.length) return msgs;
+    }
+
+    return nodes.map(messageFromNode).filter(Boolean).sort((a,b) => {
+      const da = asDate(a.time), db = asDate(b.time);
+      return (da ? da.getTime() : 0) - (db ? db.getTime() : 0);
+    });
+  }
+
+  function normalizeChat(chat, index, sourceName) {
+    const msgs = extractMessages(chat);
+    const searchText = [
+      chat.title || '',
+      ...msgs.map(m => m.text)
+    ].join('\n').toLowerCase();
+
+    return {
+      raw: chat,
+      id: chat.id || chat.conversation_id || `${sourceName}-${index}`,
+      title: chat.title || 'Untitled conversation',
+      createTime: chat.create_time || (msgs[0] && msgs[0].time) || null,
+      updateTime: chat.update_time || (msgs[msgs.length-1] && msgs[msgs.length-1].time) || null,
+      messages: msgs,
+      searchText,
+      sourceName
+    };
+  }
+
+  function sortChats(list) {
+    return [...list].sort((a,b) => {
+      const da = asDate(a.createTime), db = asDate(b.createTime);
+      const va = da ? da.getTime() : 0;
+      const vb = db ? db.getTime() : 0;
+      return newestFirst ? vb-va : va-vb;
+    });
+  }
+
+  function renderList() {
+    const query = search.value.trim().toLowerCase();
+    filtered = chats.filter(c => !query || c.searchText.includes(query));
+    filtered = sortChats(filtered);
+
+    stats.textContent = `${filtered.length.toLocaleString()} of ${chats.length.toLocaleString()} conversations`;
+    chatList.replaceChildren();
+
+    const frag = document.createDocumentFragment();
+    for (const chat of filtered) {
+      const item = document.createElement('div');
+      item.className = 'chatItem' + (chat.id === selectedId ? ' selected' : '');
+      item.dataset.id = chat.id;
+
+      const title = document.createElement('div');
+      title.className = 'chatTitle';
+      title.textContent = chat.title;
+
+      const date = document.createElement('div');
+      date.className = 'chatDate';
+      date.textContent = formatDate(chat.createTime);
+
+      item.append(title, date);
+      item.addEventListener('click', () => openChat(chat.id));
+      frag.appendChild(item);
+    }
+    chatList.appendChild(frag);
+  }
+
+  function roleLabel(role) {
+    if (role === 'user') return 'You';
+    if (role === 'assistant') return 'ChatGPT';
+    if (role === 'system') return 'System';
+    if (role === 'tool') return 'Tool';
+    return role || 'Other';
+  }
+
+  function openChat(id) {
+    selectedId = id;
+    const chat = chats.find(c => c.id === id);
+    if (!chat) return;
+
+    renderList();
+    empty.style.display = 'none';
+    conversation.style.display = 'block';
+    conversationTitle.textContent = chat.title;
+    conversationMeta.textContent =
+      `Created ${formatDate(chat.createTime, true)} · ${chat.messages.length.toLocaleString()} visible messages · Source: ${chat.sourceName}`;
+
+    messages.replaceChildren();
+    const frag = document.createDocumentFragment();
+
+    for (const msg of chat.messages) {
+      const box = document.createElement('section');
+      const cssRole = ['user','assistant'].includes(msg.role) ? msg.role : 'other';
+      box.className = `message ${cssRole}`;
+
+      const role = document.createElement('div');
+      role.className = 'role';
+      role.textContent = roleLabel(msg.role);
+
+      const body = document.createElement('div');
+      body.textContent = msg.text;
+
+      box.append(role, body);
+
+      if (msg.time) {
+        const d = document.createElement('div');
+        d.className = 'msgdate';
+        d.textContent = formatDate(msg.time, true);
+        box.appendChild(d);
+      }
+
+      frag.appendChild(box);
+    }
+    messages.appendChild(frag);
+    document.querySelector('main').scrollTop = 0;
+  }
+
+  function reset() {
+    chats = [];
+    filtered = [];
+    selectedId = null;
+    fileInput.value = '';
+    pasteInput.value = '';
+    search.value = '';
+    search.disabled = true;
+    sortBtn.disabled = true;
+    clearBtn.disabled = true;
+    chatList.replaceChildren();
+    stats.textContent = 'No archive loaded.';
+    conversation.style.display = 'none';
+    empty.style.display = 'grid';
+    empty.innerHTML = `<div><strong>Choose all of your OpenAI conversation JSON files.</strong><br><br>Official exports and individual conversation snapshots will be merged into one searchable archive.</div>`;
+  }
+
+  async function parseConversationFile(file) {
+    const text = await file.text();
+    return parseConversationText(text, file.name);
+  }
+
+  function timestampValue(v) {
+    const d = asDate(v);
+    return d ? d.getTime() : 0;
+  }
+
+  function shouldReplace(existing, incoming) {
+    const et = timestampValue(existing.updateTime) || timestampValue(existing.createTime);
+    const it = timestampValue(incoming.updateTime) || timestampValue(incoming.createTime);
+    if (it !== et) return it > et;
+    return incoming.messages.length >= existing.messages.length;
+  }
+
+  function showImportStatus(text) {
+    importStatus.innerHTML = text;
+    importStatus.className = 'statusBox show';
+  }
+
+  function mergeIncoming(incoming) {
+    const byId = new Map(chats.map(c => [c.id, c]));
+    let added = 0, updated = 0, unchanged = 0;
+    const changedTitles = [];
+
+    for (const chat of incoming) {
+      const existing = byId.get(chat.id);
+      if (!existing) {
+        byId.set(chat.id, chat);
+        added++;
+        changedTitles.push(`NEW — ${chat.title}`);
+      } else if (shouldReplace(existing, chat)) {
+        const changed =
+          timestampValue(chat.updateTime) > timestampValue(existing.updateTime) ||
+          chat.messages.length > existing.messages.length ||
+          chat.sourceName !== existing.sourceName;
+        if (changed) {
+          byId.set(chat.id, chat);
+          updated++;
+          changedTitles.push(`UPDATE — ${chat.title}`);
+        } else {
+          unchanged++;
+        }
+      } else {
+        unchanged++;
+      }
+    }
+
+    chats = Array.from(byId.values());
+    return {added, updated, unchanged, changedTitles};
+  }
+
+  function parseConversationText(text, sourceName='Pasted JSON') {
+    const data = JSON.parse(text);
+
+    if (Array.isArray(data)) return data;
+    if (data && Array.isArray(data.conversations)) return data.conversations;
+
+    if (data && typeof data === 'object' && data.mapping &&
+        (data.conversation_id || data.id || data.title)) {
+      return [data];
+    }
+
+    throw new Error(`${sourceName} does not look like an OpenAI conversation JSON payload.`);
+  }
+
+  function finishIncomingImport(incoming) {
+    let result;
+    if (!chats.length) {
+      const byId = new Map();
+      for (const chat of incoming) {
+        const existing = byId.get(chat.id);
+        if (!existing || shouldReplace(existing, chat)) byId.set(chat.id, chat);
+      }
+      chats = Array.from(byId.values());
+      result = {added: chats.length, updated: 0, unchanged: incoming.length - chats.length, changedTitles: incoming.map(c => `NEW — ${c.title}`)};
+    } else {
+      result = mergeIncoming(incoming);
+    }
+
+    search.disabled = false;
+    sortBtn.disabled = false;
+    clearBtn.disabled = false;
+    saveBtn.disabled = false;
+    renderList();
+
+    let summary = `<strong>Import complete.</strong> ${result.added} new · ${result.updated} updated · ${result.unchanged} unchanged.`;
+    if (result.changedTitles.length && (result.added + result.updated) <= 20) {
+      const shown = result.changedTitles.slice(0, 8).map(x => `• ${x}`).join('<br>');
+      const more = result.changedTitles.length > 8 ? `<br>…and ${result.changedTitles.length - 8} more.` : '';
+      summary += `<br>${shown}${more}`;
+    } else if (result.changedTitles.length) {
+      summary += `<br>Archive loaded. Scroll down to browse the full conversation list.`;
+    }
+    showImportStatus(summary);
+
+    empty.innerHTML =
+      `<div><strong>Archive loaded.</strong><br><br>${chats.length.toLocaleString()} unique conversations are merged locally.<br>Select a conversation from the left.</div>`;
+
+    return result;
+  }
+
+  pasteBtn.addEventListener('click', () => {
+    const text = pasteInput.value.trim();
+    if (!text) {
+      alert('Paste the copied conversation JSON into the box first.');
+      pasteInput.focus();
+      return;
+    }
+
+    try {
+      const arr = parseConversationText(text, 'Pasted JSON');
+      const incoming = arr.map((chat, idx) => normalizeChat(chat, idx, 'Pasted JSON'));
+      const result = finishIncomingImport(incoming);
+      pasteInput.value = '';
+
+      if (incoming.length === 1 && (result.added || result.updated)) {
+        openChat(incoming[0].id);
+      }
+    } catch (err) {
+      alert('Could not read the pasted JSON:\\n\\n' + (err && err.message ? err.message : String(err)));
+    }
+  });
+
+  fileInput.addEventListener('change', async () => {
+    const selected = Array.from(fileInput.files || []);
+    if (!selected.length) return;
+
+    const jsonFiles = selected
+      .filter(f => /\.json$/i.test(f.name))
+      .sort((a,b) => a.name.localeCompare(b.name, undefined, {numeric:true}));
+
+    if (!jsonFiles.length) {
+      alert('Please select one or more JSON conversation files.');
+      return;
+    }
+
+    stats.textContent = `Reading ${jsonFiles.length} file${jsonFiles.length === 1 ? '' : 's'}…`;
+
+    try {
+      const incoming = [];
+      for (let i = 0; i < jsonFiles.length; i++) {
+        const file = jsonFiles[i];
+        stats.textContent = `Reading ${file.name} (${i + 1} of ${jsonFiles.length})…`;
+        const arr = await parseConversationFile(file);
+        arr.forEach((chat, idx) => incoming.push(normalizeChat(chat, idx, file.name)));
+        await new Promise(r => setTimeout(r, 0));
+      }
+
+      finishIncomingImport(incoming);
+      fileInput.value = '';
+    } catch (err) {
+      stats.textContent = chats.length
+        ? `${chats.length.toLocaleString()} conversations loaded.`
+        : 'No archive loaded.';
+      alert('Could not open the selected file(s):\n\n' + (err && err.message ? err.message : String(err)));
+      fileInput.value = '';
+    }
+  });
+
+  function safeFilenameDate() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }
+
+  saveBtn.addEventListener('click', () => {
+    if (!chats.length) return;
+
+    const raw = sortChats(chats).map(c => c.raw);
+    const blob = new Blob([JSON.stringify(raw, null, 2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `eriks_chatgpt_master_archive_${safeFilenameDate()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+    showImportStatus(`<strong>Master archive created.</strong> ${chats.length.toLocaleString()} conversations were written to a new local JSON file. Your original files were not changed.`);
+  });
+
+  function normalizeWheelDelta(event) {
+    let dy = event.deltaY || 0;
+    if (event.deltaMode === 1) dy *= 16;
+    else if (event.deltaMode === 2) dy *= window.innerHeight;
+    return dy;
+  }
+
+  function addScrollFallback(el) {
+    el.addEventListener('wheel', (event) => {
+      const dy = normalizeWheelDelta(event);
+      if (!dy) return;
+
+      const canScroll = el.scrollHeight > el.clientHeight + 1;
+      if (!canScroll) return;
+
+      const atTop = el.scrollTop <= 0;
+      const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
+
+      if ((dy < 0 && !atTop) || (dy > 0 && !atBottom)) {
+        el.scrollTop += dy;
+        event.preventDefault();
+      }
+    }, { passive: false });
+
+    el.addEventListener('mousedown', () => {
+      if (typeof el.focus === 'function') el.focus({preventScroll:true});
+    });
+  }
+
+  addScrollFallback(chatList);
+  addScrollFallback(document.querySelector('main'));
+
+  search.addEventListener('input', renderList);
+
+  sortBtn.addEventListener('click', () => {
+    newestFirst = !newestFirst;
+    sortBtn.textContent = newestFirst ? 'Newest first' : 'Oldest first';
+    renderList();
+  });
+
+  clearBtn.addEventListener('click', reset);
+})();
+</script>
+</body>
+</html>
